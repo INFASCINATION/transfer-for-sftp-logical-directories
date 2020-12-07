@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: CloudFormation template to deploy Transfer for SFTP with a custom authorizor.
+Outputs:
+  SftpIdpLambda:
+    Description: SFTP IDP Lambda handler
+    Value:
+      Fn::GetAtt:
+      - SftpIdp
+      - Outputs.LambdaName
+  SftpServerId:
+    Description: SFTP Server ID
+    Value:
+      Fn::GetAtt:
+      - SftpServer
+      - Outputs.SftpServerId
+Parameters:
+  StackId:
+    Description: Stack identifier
+    Type: String
+Resources:
+  PublicBucket:
+    Properties:
+      AccessControl: Private
+      BucketName:
+        Fn::Sub:
+        - ${StackId}-public-bucket
+        - StackId:
+            Ref: StackId
+    Type: AWS::S3::Bucket
+  SampleData:
+    DependsOn:
+    - PublicBucket
+    - SubscribedBucket
+    Properties:
+      ServiceToken:
+        Fn::GetAtt:
+        - SampleDataLambda
+        - Arn
+    Type: Custom::SampleData
+  SampleDataLambda:
+    Properties:
+      Code:
+        S3Bucket: inf-public-us-east-1
+        S3Key: 6c6dff87fcf726fb2160598be35d2746
+      Description: A function to create sample data in the associated S3 buckets
+      Environment:
+        Variables:
+          public_research:
+            Ref: PublicBucket
+          subscriptions:
+            Ref: SubscribedBucket
+      Handler: lambda_function.handler
+      Role:
+        Fn::GetAtt:
+        - SampleDataLambdaRole
+        - Arn
+      Runtime: python3.7
+    Type: AWS::Lambda::Function
+  SampleDataLambdaRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action:
+          - sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+        Version: '2012-10-17'
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+      - PolicyDocument:
+          Statement:
+          - Action:
+            - s3:*
+            Effect: Allow
+            Resource:
+            - Fn::GetAtt:
+              - SubscribedBucket
+              - Arn
+            - Fn::GetAtt:
+              - PublicBucket
+              - Arn
+            - Fn::Sub: ${SubscribedBucket.Arn}/*
+            - Fn::Sub: ${PublicBucket.Arn}/*
+          Version: '2012-10-17'
+        PolicyName: SampleDataBucketFullAccess
+    Type: AWS::IAM::Role
+  SftpIdp:
+    Properties:
+      Parameters:
+        PublicBucket:
+          Ref: PublicBucket
+        SubscribedBucket:
+          Ref: SubscribedBucket
+      TemplateURL: https://s3.amazonaws.com/inf-public-us-east-1/020a9f7ad0cd63ee5dd505a0fd7aeed8.template
+    Type: AWS::CloudFormation::Stack
+  SftpServer:
+    Properties:
+      Parameters:
+        IdpInvocationRole:
+          Fn::GetAtt:
+          - SftpIdp
+          - Outputs.TransferIdentityProviderInvocationRole
+        IdpUrl:
+          Fn::GetAtt:
+          - SftpIdp
+          - Outputs.TransferIdentityProviderUrl
+      TemplateURL: https://s3.amazonaws.com/inf-public-us-east-1/3cd4f95416b7e476a6a09bb067212188.template
+    Type: AWS::CloudFormation::Stack
+  SubscribedBucket:
+    Properties:
+      AccessControl: Private
+      BucketName:
+        Fn::Sub:
+        - ${StackId}-subscribe-bucket
+        - StackId:
+            Ref: StackId
+    Type: AWS::S3::Bucket
